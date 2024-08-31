@@ -1,6 +1,5 @@
-use std::sync::{Mutex, Arc};
-use std::thread;
-
 mod token_bucket;
 
-fn main() { }
+fn main(){
+    println!("practising threads and datastructures");
+}

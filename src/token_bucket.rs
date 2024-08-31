@@ -89,6 +89,7 @@ mod test_try_take {
         assert!(tb.try_take().is_none());
     }
 }
+
 #[cfg(test)]
 mod test_take {
     use super::*;
