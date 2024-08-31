@@ -1,29 +1,37 @@
 use std::cmp;
+use std::fmt;
 use std::time::{Duration, SystemTime};
 
 #[cfg(test)]
 use std::thread;
 
 /// Percision of 5ms for take
+#[derive(Clone, Copy)]
 pub struct TokenBucket {
     last_refreshed: SystemTime,
     max_refresh_duration: Duration,
     refresh_interval: Duration,
 }
 impl TokenBucket {
-    pub fn new(refresh_interval_ms: u64, max_capacity: u64, initial_capacity: u64) -> TokenBucket {
-        let current_tokens_count = cmp::min(max_capacity, initial_capacity);
-        let last_refreshed = SystemTime::now()
-            .checked_sub(Duration::from_millis(
-                refresh_interval_ms * current_tokens_count,
-            ))
-            .expect("clock might have moved forward");
+    pub fn new(
+        refresh_interval_ms: u64,
+        max_capacity: u64,
+        initial_capacity: u64,
+    ) -> Option<TokenBucket> {
+        if refresh_interval_ms == 0 {
+            return None;
+        }
 
-        TokenBucket {
+        let current_tokens_count = cmp::min(max_capacity, initial_capacity);
+        let last_refreshed = SystemTime::now().checked_sub(Duration::from_millis(
+            refresh_interval_ms * current_tokens_count,
+        ))?;
+
+        Some(TokenBucket {
             max_refresh_duration: Duration::from_millis(refresh_interval_ms * max_capacity),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             last_refreshed,
-        }
+        })
     }
 
     fn get_effective_last_refreshed(&self) -> Option<SystemTime> {
@@ -60,6 +68,25 @@ impl TokenBucket {
     }
 }
 
+// TODO: write tests
+impl fmt::Debug for TokenBucket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match self.get_effective_last_refreshed() {
+            Some(last_refreshed) => {
+                let elapsed = SystemTime::now()
+                    .duration_since(last_refreshed)
+                    .map_err(|_| fmt::Error)?;
+                let count = elapsed
+                    .as_millis()
+                    .checked_div(self.refresh_interval.as_millis())
+                    .or(Some(0));
+                f.debug_tuple("TokenBucket").field(&count).finish()
+            }
+            None => Err(fmt::Error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_try_take {
     use super::*;
@@ -67,14 +94,14 @@ mod test_try_take {
     #[test]
     fn initializes_with_proper_tokens() {
         // needs to have min(max capacity , initial_capacity)
-        let mut tb = TokenBucket::new(1, 1, 2);
+        let mut tb = TokenBucket::new(1, 1, 2).unwrap();
         assert!(tb.try_take().is_some());
         assert!(tb.try_take().is_none());
     }
 
     #[test]
     fn can_take_all_initial() {
-        let mut tb = TokenBucket::new(1, 2, 2);
+        let mut tb = TokenBucket::new(1, 2, 2).unwrap();
         assert!(tb.try_take().is_some());
         assert!(tb.try_take().is_some());
         assert!(tb.try_take().is_none());
@@ -82,7 +109,7 @@ mod test_try_take {
 
     #[test]
     fn can_take_generated_tokens() {
-        let mut tb = TokenBucket::new(100, 2, 1);
+        let mut tb = TokenBucket::new(100, 2, 1).unwrap();
         assert!(tb.try_take().is_some());
         thread::sleep(Duration::from_millis(100));
         assert!(tb.try_take().is_some());
@@ -96,7 +123,7 @@ mod test_take {
 
     #[test]
     fn can_take_all_initial() {
-        let mut tb = TokenBucket::new(50, 3, 3);
+        let mut tb = TokenBucket::new(50, 3, 3).unwrap();
         assert!(tb.take().is_some());
         assert!(tb.take().is_some());
         assert!(tb.take().is_some());
@@ -104,7 +131,7 @@ mod test_take {
 
     #[test]
     fn can_take_after_waiting() {
-        let mut tb = TokenBucket::new(50, 2, 1);
+        let mut tb = TokenBucket::new(50, 2, 1).unwrap();
         assert!(tb.take().is_some());
         let now = SystemTime::now();
         assert!(tb.take().is_some());
@@ -117,9 +144,9 @@ mod test_take {
 
     #[test]
     fn can_take_multiple_after_waiting() {
-        let mut tb = TokenBucket::new(10, 2, 0);
+        let mut tb = TokenBucket::new(10, 2, 0).unwrap();
         let now = SystemTime::now();
-        for _ in 0..10{
+        for _ in 0..10 {
             assert!(tb.take().is_some());
         }
         let elapsed = now
@@ -127,12 +154,12 @@ mod test_take {
             .expect("clock might have went backward")
             .as_millis();
         let bound = 100;
-        assert!(elapsed >= bound && elapsed <= bound+5);
+        assert!(elapsed >= bound && elapsed <= bound + 5);
     }
 
     #[test]
     fn can_take_generated_tokens() {
-        let mut tb = TokenBucket::new(50, 2, 0);
+        let mut tb = TokenBucket::new(50, 2, 0).unwrap();
         thread::sleep(Duration::from_millis(100));
         let now = SystemTime::now();
         assert!(tb.take().is_some());
